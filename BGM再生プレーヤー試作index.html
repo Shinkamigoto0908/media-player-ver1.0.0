@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>MP3 プレイヤー</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: #f2f2f2;
+      color: #333;
+    }
+
+    #topbar {
+      background: #ccc;
+      padding: 10px;
+      font-weight: bold;
+      border-bottom: 1px solid #aaa;
+    }
+
+    #container {
+      display: flex;
+      height: calc(100vh - 140px);
+    }
+
+    #sidebar {
+      width: 240px;
+      background: #e4e4e4;
+      border-right: 1px solid #bbb;
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    #sidebar h4 {
+      margin: 0 0 5px 0;
+    }
+
+    #sidebar button {
+      padding: 6px;
+      border: none;
+      border-radius: 4px;
+      background: #2196f3;
+      color: white;
+      cursor: pointer;
+    }
+
+    #searchBox {
+      padding: 6px;
+      border: 1px solid #aaa;
+      border-radius: 4px;
+      width: 100%;
+    }
+
+    #main {
+      flex: 1;
+      padding: 10px;
+      overflow-y: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 8px;
+      border-bottom: 1px solid #ccc;
+    }
+
+    tr.playing {
+      background-color: #d0e7ff;
+      font-weight: bold;
+    }
+
+    .custom-player {
+      background: #ddd;
+      padding: 10px 15px;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .controls button {
+      padding: 6px 10px;
+      border: 1px solid #aaa;
+      background: white;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    .progress,
+    .volume {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .progress input,
+    .volume input {
+      flex: 1;
+    }
+
+    #timeDisplay {
+      text-align: right;
+      font-size: 0.9em;
+      margin-top: 5px;
+    }
+
+    audio {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+<div id="topbar">
+  🎵 MP3 プレイヤー　
+  <input type="file" id="fileInput" accept=".mp3" multiple>
+</div>
+
+<div id="container">
+  <div id="sidebar">
+    <div>
+      <h4>フィルター</h4>
+      <button onclick="showAll()">すべての曲</button>
+      <button onclick="filterFavorites()">お気に入りのみ</button>
+    </div>
+
+    <div>
+      <h4>検索</h4>
+      <input type="text" id="searchBox" placeholder="曲名で検索" oninput="searchTracks()">
+    </div>
+  </div>
+
+  <div id="main">
+    <h3>トラック一覧</h3>
+    <table>
+      <thead>
+        <tr><th>#</th><th>タイトル</th><th>長さ</th><th>★</th></tr>
+      </thead>
+      <tbody id="tracklist"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="custom-player">
+  <audio id="audioPlayer"></audio>
+
+  <div class="controls">
+    <button id="prevBtn">◀</button>
+    <button id="playPauseBtn">▶</button>
+    <button id="nextBtn">▶▶</button>
+    <button id="loopBtn">ループ: OFF</button>
+  </div>
+
+  <div class="progress">
+    <input type="range" id="seekBar" value="0" min="0" max="100">
+  </div>
+  <div id="timeDisplay">00:00 / 00:00</div>
+
+  <div class="volume">
+    🔉
+    <input type="range" id="volumeBar" min="0" max="1" step="0.01" value="1">
+  </div>
+</div>
+
+<script>
+  const fileInput = document.getElementById('fileInput');
+  const audioPlayer = document.getElementById('audioPlayer');
+  const tracklist = document.getElementById('tracklist');
+  const playPauseBtn = document.getElementById('playPauseBtn');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const loopBtn = document.getElementById('loopBtn');
+  const seekBar = document.getElementById('seekBar');
+  const timeDisplay = document.getElementById('timeDisplay');
+  const volumeBar = document.getElementById('volumeBar');
+  const searchBox = document.getElementById('searchBox');
+
+  let files = [];
+  let filteredIndexes = [];
+  let favorites = new Set();
+  let currentIndex = 0;
+  let loopMode = false;
+  let isSeeking = false;
+
+  fileInput.addEventListener('change', () => {
+    const newFiles = Array.from(fileInput.files);
+    files = [...files, ...newFiles];
+    filteredIndexes = files.map((_, i) => i);
+    renderPlaylist();
+    if (files.length === newFiles.length) playTrack(0); // 最初の追加時だけ再生
+  });
+
+  function renderPlaylist() {
+    tracklist.innerHTML = '';
+    filteredIndexes.forEach(i => {
+      const file = files[i];
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>${i + 1}</td>
+        <td>${file.name}</td>
+        <td class="duration">--:--</td>
+        <td><button onclick="toggleFavorite(${i}); event.stopPropagation();">
+          ${favorites.has(i) ? '★' : '☆'}
+        </button></td>
+      `;
+      row.addEventListener('click', () => playTrack(i));
+      tracklist.appendChild(row);
+
+      const tmpAudio = new Audio(URL.createObjectURL(file));
+      tmpAudio.addEventListener('loadedmetadata', () => {
+        const min = Math.floor(tmpAudio.duration / 60);
+        const sec = String(Math.floor(tmpAudio.duration % 60)).padStart(2, '0');
+        row.querySelector('.duration').textContent = `${min}:${sec}`;
+      });
+    });
+    updateUI();
+  }
+
+  function playTrack(i) {
+    currentIndex = i;
+    audioPlayer.src = URL.createObjectURL(files[i]);
+    audioPlayer.play();
+    playPauseBtn.textContent = '⏸';
+    updateUI();
+  }
+
+  function updateUI() {
+    [...tracklist.children].forEach((row, idx) => {
+      row.classList.toggle('playing', filteredIndexes[idx] === currentIndex);
+    });
+  }
+
+  playPauseBtn.addEventListener('click', () => {
+    if (audioPlayer.paused) {
+      audioPlayer.play();
+      playPauseBtn.textContent = '⏸';
+    } else {
+      audioPlayer.pause();
+      playPauseBtn.textContent = '▶';
+    }
+  });
+
+  prevBtn.addEventListener('click', () => {
+    if (currentIndex > 0) playTrack(currentIndex - 1);
+  });
+
+  nextBtn.addEventListener('click', () => {
+    if (currentIndex < files.length - 1) playTrack(currentIndex + 1);
+  });
+
+  loopBtn.addEventListener('click', () => {
+    loopMode = !loopMode;
+    audioPlayer.loop = loopMode;
+    loopBtn.textContent = `ループ: ${loopMode ? 'ON' : 'OFF'}`;
+  });
+
+  audioPlayer.addEventListener('timeupdate', () => {
+    if (!isSeeking) {
+      seekBar.value = (audioPlayer.currentTime / audioPlayer.duration) * 100;
+      updateTime();
+    }
+  });
+
+  seekBar.addEventListener('input', () => isSeeking = true);
+  seekBar.addEventListener('change', () => {
+    audioPlayer.currentTime = audioPlayer.duration * (seekBar.value / 100);
+    isSeeking = false;
+  });
+
+  function updateTime() {
+    const format = s => isNaN(s) ? '00:00' : `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2, '0')}`;
+    timeDisplay.textContent = `${format(audioPlayer.currentTime)} / ${format(audioPlayer.duration)}`;
+  }
+
+  volumeBar.addEventListener('input', e => audioPlayer.volume = e.target.value);
+
+  function toggleFavorite(i) {
+    if (favorites.has(i)) favorites.delete(i);
+    else favorites.add(i);
+    renderPlaylist();
+  }
+
+  function filterFavorites() {
+    filteredIndexes = files.map((_, i) => i).filter(i => favorites.has(i));
+    renderPlaylist();
+  }
+
+  function showAll() {
+    filteredIndexes = files.map((_, i) => i);
+    renderPlaylist();
+  }
+
+  function searchTracks() {
+    const q = searchBox.value.toLowerCase();
+    filteredIndexes = files
+      .map((f, i) => ({ f, i }))
+      .filter(({ f }) => f.name.toLowerCase().includes(q))
+      .map(({ i }) => i);
+    renderPlaylist();
+  }
+</script>
+
+</body>
+</html>
